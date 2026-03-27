@@ -8,7 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from 'ssh2';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, basename, normalize } from 'path';
 import { fileURLToPath } from 'url';
 
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -359,12 +359,12 @@ class SSHMCPServer {
         const resolved = { ...args };
 
         const mapping = {
-            username:       `PROFILE_${name}_USER`,
-            password:       `PROFILE_${name}_PASSWORD`,
+            username: `PROFILE_${name}_USER`,
+            password: `PROFILE_${name}_PASSWORD`,
             enablePassword: `PROFILE_${name}_ENABLE_PASSWORD`,
-            deviceType:     `PROFILE_${name}_DEVICE_TYPE`,
-            jumpCommand:    `PROFILE_${name}_JUMP_COMMAND`,
-            preset:         `PROFILE_${name}_PRESET`,
+            deviceType: `PROFILE_${name}_DEVICE_TYPE`,
+            jumpCommand: `PROFILE_${name}_JUMP_COMMAND`,
+            preset: `PROFILE_${name}_PRESET`,
         };
 
         for (const [field, envKey] of Object.entries(mapping)) {
@@ -515,10 +515,10 @@ class SSHMCPServer {
     resolveJumpShellConfig(args) {
         const preset = args.preset ? JUMP_SHELL_PRESETS[args.preset.toLowerCase()] : null;
 
-        const jumpCommand       = args.jumpCommand       || (preset && preset.jumpCommand)       || null;
-        const jumpPromptPattern = args.jumpPromptPattern  || (preset && preset.jumpPromptPattern) || null;
-        const jumpExitCommand   = args.jumpExitCommand    || (preset && preset.jumpExitCommand)   || 'exit';
-        const jumpReadyTimeout  = args.jumpReadyTimeout   || (preset && preset.jumpReadyTimeout)  || 5000;
+        const jumpCommand = args.jumpCommand || (preset && preset.jumpCommand) || null;
+        const jumpPromptPattern = args.jumpPromptPattern || (preset && preset.jumpPromptPattern) || null;
+        const jumpExitCommand = args.jumpExitCommand || (preset && preset.jumpExitCommand) || 'exit';
+        const jumpReadyTimeout = args.jumpReadyTimeout || (preset && preset.jumpReadyTimeout) || 5000;
 
         if (!jumpCommand) {
             const hint = args.preset
@@ -1100,6 +1100,7 @@ class SSHMCPServer {
                     connectionId,
                     deviceType: deviceType.toLowerCase(),
                     enablePassword,
+                    privateKeyBasename: resolvedKeyPath ? basename(resolvedKeyPath).toLowerCase() : null,
                     jumpConfig: null,
                     jumpShellActive: false,
                     shell: null,
@@ -1383,6 +1384,7 @@ class SSHMCPServer {
                     connectionId,
                     deviceType: 'jump_shell',
                     enablePassword: null,
+                    privateKeyBasename: resolvedKeyPath ? basename(resolvedKeyPath).toLowerCase() : null,
                     jumpConfig,
                     jumpShellActive: false,
                     shell: null,
@@ -1675,8 +1677,8 @@ class SSHMCPServer {
                         output += data.toString();
                     })
                     .stderr.on('data', (data) => {
-                    errorOutput += data.toString();
-                });
+                        errorOutput += data.toString();
+                    });
             });
         });
     }
@@ -1934,7 +1936,7 @@ class SSHMCPServer {
                 });
                 try {
                     if (connInfo.jumpShellActive) {
-                        this.exitJumpShell(connInfo, connectionId).catch(() => {});
+                        this.exitJumpShell(connInfo, connectionId).catch(() => { });
                     }
                     if (connInfo.keepaliveInterval) clearInterval(connInfo.keepaliveInterval);
                     if (connInfo.shell) connInfo.shell.end();
@@ -2112,6 +2114,34 @@ class SSHMCPServer {
     }
 
     // ===========================================================================
+    // PRIVATE KEY PATH VALIDATION
+    // ===========================================================================
+
+    /**
+     * Check whether a local file path matches the private key used by a connection.
+     * Compares the basename of the target file against the stored privateKeyBasename.
+     * Set env SSH_ALLOW_PRIVATE_KEY_ACCESS=true to disable this check.
+     * Returns { blocked: true, reason } or { blocked: false }.
+     */
+    _isConnectionPrivateKey(filePath, connection) {
+        if (process.env.SSH_ALLOW_PRIVATE_KEY_ACCESS === 'true') {
+            return { blocked: false };
+        }
+
+        if (!connection.privateKeyBasename) {
+            return { blocked: false };
+        }
+
+        const name = basename(normalize(resolve(filePath))).toLowerCase();
+
+        if (name === connection.privateKeyBasename) {
+            return { blocked: true, reason: `Access to the connection's private key file '${name}' is not allowed. Set SSH_ALLOW_PRIVATE_KEY_ACCESS=true to bypass this restriction.` };
+        }
+
+        return { blocked: false };
+    }
+
+    // ===========================================================================
     // FILE OPERATIONS
     // ===========================================================================
     async handleSSHUploadFile(args) {
@@ -2121,6 +2151,14 @@ class SSHMCPServer {
         if (!connection) throw new Error(`No connection: ${connectionId}`);
 
         const absolutePath = resolve(localPath);
+
+        // Block upload of the connection's private key file
+        const keyCheck = this._isConnectionPrivateKey(absolutePath, connection);
+        if (keyCheck.blocked) {
+            logger.warn(`Upload blocked: private key file`, { connectionId, localPath: absolutePath, reason: keyCheck.reason });
+            throw new Error(`Upload blocked: ${keyCheck.reason}`);
+        }
+
         logger.info(`Uploading file`, { connectionId, localPath: absolutePath, remotePath });
 
         return new Promise((resolve, reject) => {
@@ -2154,6 +2192,14 @@ class SSHMCPServer {
         if (!connection) throw new Error(`No connection: ${connectionId}`);
 
         const absolutePath = resolve(localPath);
+
+        // Block download to the connection's private key file path (prevents overwriting)
+        const keyCheck = this._isConnectionPrivateKey(absolutePath, connection);
+        if (keyCheck.blocked) {
+            logger.warn(`Download blocked: private key path`, { connectionId, localPath: absolutePath, reason: keyCheck.reason });
+            throw new Error(`Download blocked: ${keyCheck.reason}`);
+        }
+
         logger.info(`Downloading file`, { connectionId, remotePath, localPath: absolutePath });
 
         return new Promise((resolve, reject) => {
