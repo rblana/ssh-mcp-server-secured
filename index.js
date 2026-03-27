@@ -359,12 +359,12 @@ class SSHMCPServer {
         const resolved = { ...args };
 
         const mapping = {
-            username:       `PROFILE_${name}_USER`,
-            password:       `PROFILE_${name}_PASSWORD`,
+            username: `PROFILE_${name}_USER`,
+            password: `PROFILE_${name}_PASSWORD`,
             enablePassword: `PROFILE_${name}_ENABLE_PASSWORD`,
-            deviceType:     `PROFILE_${name}_DEVICE_TYPE`,
-            jumpCommand:    `PROFILE_${name}_JUMP_COMMAND`,
-            preset:         `PROFILE_${name}_PRESET`,
+            deviceType: `PROFILE_${name}_DEVICE_TYPE`,
+            jumpCommand: `PROFILE_${name}_JUMP_COMMAND`,
+            preset: `PROFILE_${name}_PRESET`,
         };
 
         for (const [field, envKey] of Object.entries(mapping)) {
@@ -515,10 +515,10 @@ class SSHMCPServer {
     resolveJumpShellConfig(args) {
         const preset = args.preset ? JUMP_SHELL_PRESETS[args.preset.toLowerCase()] : null;
 
-        const jumpCommand       = args.jumpCommand       || (preset && preset.jumpCommand)       || null;
-        const jumpPromptPattern = args.jumpPromptPattern  || (preset && preset.jumpPromptPattern) || null;
-        const jumpExitCommand   = args.jumpExitCommand    || (preset && preset.jumpExitCommand)   || 'exit';
-        const jumpReadyTimeout  = args.jumpReadyTimeout   || (preset && preset.jumpReadyTimeout)  || 5000;
+        const jumpCommand = args.jumpCommand || (preset && preset.jumpCommand) || null;
+        const jumpPromptPattern = args.jumpPromptPattern || (preset && preset.jumpPromptPattern) || null;
+        const jumpExitCommand = args.jumpExitCommand || (preset && preset.jumpExitCommand) || 'exit';
+        const jumpReadyTimeout = args.jumpReadyTimeout || (preset && preset.jumpReadyTimeout) || 5000;
 
         if (!jumpCommand) {
             const hint = args.preset
@@ -1652,8 +1652,8 @@ class SSHMCPServer {
                         output += data.toString();
                     })
                     .stderr.on('data', (data) => {
-                    errorOutput += data.toString();
-                });
+                        errorOutput += data.toString();
+                    });
             });
         });
     }
@@ -1911,7 +1911,7 @@ class SSHMCPServer {
                 });
                 try {
                     if (connInfo.jumpShellActive) {
-                        this.exitJumpShell(connInfo, connectionId).catch(() => {});
+                        this.exitJumpShell(connInfo, connectionId).catch(() => { });
                     }
                     if (connInfo.keepaliveInterval) clearInterval(connInfo.keepaliveInterval);
                     if (connInfo.shell) connInfo.shell.end();
